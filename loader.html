@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <title>Tweet Loader</title>
+  <style>
+    body {
+      font-family: monospace;
+      background: #111;
+      color: #eee;
+      padding: 2em;
+    }
+    input[type="file"] {
+      margin: 1em 0;
+    }
+    pre {
+      background: #222;
+      padding: 1em;
+      overflow-x: auto;
+    }
+  </style>
+</head>
+<body>
+  <h1>Phext Extractor</h1>
+  <input type="file" id="fileInput" accept=".js,.json" />
+  <button onclick="processFile()">Extract</button>
+  <pre id="log">Awaiting file upload...</pre>
+  <script>
+    const SCROLL_BREAK = String.fromCharCode(0x17);
+    const SECTION_BREAK = String.fromCharCode(0x18);
+    const CHAPTER_BREAK = String.fromCharCode(0x19);
+
+    function log(msg) {
+      document.getElementById('log').textContent += `\n${msg}`;
+    }
+
+    function download(filename, content) {
+      const blob = new Blob([content], {type: 'text/plain'});
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      a.click();
+      URL.revokeObjectURL(url);
+    }
+
+    function processFile() {
+      const input = document.getElementById('fileInput');
+      const file = input.files[0];
+      if (!file) {
+        log('Please select a file.');
+        return;
+      }
+
+      const reader = new FileReader();
+      reader.onload = () => {
+        let raw = reader.result;
+        log(`Loaded ${file.name}, ${raw.length} bytes`);
+        try {
+          raw = raw.replace(/^window\.YTD\.tweets\.part0 = /, '');
+          const data = JSON.parse(raw);
+          log(`Parsed ${data.length} tweet records`);
+
+          const tweets = {};
+          const years = {};
+          let scrolls = 0;
+          let totalBytes = 0;
+
+          for (const record of data) {
+            const tweet = record.tweet;
+            const id = tweet.id;
+            const text = tweet.full_text;
+            const created = tweet.created_at;
+
+            const [_, month, , , year] = created.split(' ');
+            if (!years[year]) years[year] = {};
+            if (!years[year][month]) years[year][month] = [];
+
+            const scroll = `${text} (${created}) [${id}]${SCROLL_BREAK}`;
+            years[year][month].push(scroll);
+            tweets[id] = { text, created };
+            totalBytes += text.length;
+            scrolls++;
+          }
+
+          const reviewJson = JSON.stringify(tweets, null, 2);
+          download('review.json', reviewJson);
+          log(`Saved review.json (${Object.keys(tweets).length} tweets, ${totalBytes} bytes)`);
+
+          const phext = [];
+          let sections = 0;
+          let chapters = 0;
+          for (const year of Object.keys(years).sort()) {
+            for (const month of Object.keys(years[year]).sort()) {
+              phext.push(...years[year][month]);
+              phext.push(SECTION_BREAK);
+              sections++;
+            }
+            phext.push(CHAPTER_BREAK);
+            chapters++;
+          }
+
+          download('review.phext', phext.join(''));
+          log(`Saved review.phext (${scrolls} scrolls, ${sections} sections, ${chapters} chapters)`);
+
+        } catch (e) {
+          log('Error: ' + e.message);
+        }
+      };
+      reader.readAsText(file);
+    }
+  </script>
+
+</body>
+</html>
